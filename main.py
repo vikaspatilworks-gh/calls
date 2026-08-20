@@ -1,95 +1,125 @@
-import os
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from supabase import create_client, Client
+import os
 
 app = Flask(__name__)
 
-# Replace with your actual Supabase credentials
-SUPABASE_URL = "https://mxaphksqgwmjtndboiqf.supabase.co"
-SUPABASE_KEY = "sb_publishable_wuvUKqh_ExzFcRWv3GxbyA_RLwYTZO_"
+# --- Supabase Credentials ---
+# Reads from Render Environment Variables first, falls back to static string if provided
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://your-supabase-url.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "your-supabase-anon-key")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
+# 1. Main Dashboard Route
 @app.route('/')
 def dashboard():
-    lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
-    staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
-    customers = supabase.table('customers').select('cust_id, customer, cust_type, mobile').execute().data
-    recent_calls = supabase.table('calls').select(
-        '*, customers!fk_calls_customer(customer), staff!fk_calls_allot_staff(staffname)'
-    ).order('created_at', desc=True).limit(10).execute().data
-    
-    return render_template('index.html', lookups=lookups, staff=staff_list, customers=customers, calls=recent_calls)
+    try:
+        # Fetch active lookup options (Complaint types, statuses, customer types, etc.)
+        lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
+        
+        # Fetch staff list
+        staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
+        
+        # Fetch customer list
+        customer_list = supabase.table('customers').select('cust_id, customer, mobile, cust_type').execute().data
+        
+        # Fetch recent calls with customer details and assigned staff
+        recent_calls = supabase.table('calls').select(
+            'call_id, complaint, call_status, created_at, allot_staff_id, cust_id, customers(customer, mobile), staff(staffname)'
+        ).order('created_at', desc=True).limit(50).execute().data
+        
+        return render_template(
+            'index.html',
+            lookups=lookups,
+            staff=staff_list,
+            customers=customer_list,
+            calls=recent_calls
+        )
+    except Exception as e:
+        return f"Database error: {str(e)}", 500
 
-@app.route('/customers/save', methods=['POST'])
-@app.route('/')
 
-def dashboard():
-    lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
-    staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
-    
-    # Query including call_status
-    recent_calls = supabase.table('calls').select(
-        'call_id, complaint, call_status, created_at, customers(customer, mobile), staff(staffname)'
-    ).order('created_at', desc=True).limit(50).execute().data
-    
-    return render_template('index.html', lookups=lookups, staff=staff_list, calls=recent_calls)
-
+# 2. Staff Cards Route
 @app.route('/staff-cards')
-
 def staff_cards():
-    lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
-    staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
-    calls = supabase.table('calls').select(
-        'call_id, complaint, call_status, allot_staff_id, customers(customer, mobile)'
-    ).execute().data
-    return render_template('staff_cards.html', staff=staff_list, calls=calls, lookups=lookups)
+    try:
+        lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
+        staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
+        calls = supabase.table('calls').select(
+            'call_id, complaint, call_status, allot_staff_id, cust_id, customers(customer, mobile)'
+        ).execute().data
+        
+        return render_template(
+            'staff_cards.html',
+            staff=staff_list,
+            calls=calls,
+            lookups=lookups
+        )
+    except Exception as e:
+        return f"Database error: {str(e)}", 500
 
-def save_customer():
-    data = {
-        "customer": request.form.get('customer'),
-        "cust_type": request.form.get('cust_type'),
-        "software": request.form.get('software'),
-        "mobile": request.form.get('mobile'),
-        "city": request.form.get('city'),
-        "area": request.form.get('area'),
-        "market": request.form.get('market'),
-        "gstin": request.form.get('gstin'),
-        "total_pc": int(request.form.get('total_pc') or 0),
-        "amc_amt": float(request.form.get('amc_amt') or 0)
-    }
-    supabase.table('customers').insert(data).execute()
-    return redirect(url_for('dashboard'))
 
-@app.route('/calls/save', methods=['POST'])
-def save_call():
-    data = {
-        "call_no": f"CALL-{os.urandom(2).hex().upper()}",
-        "cust_id": int(request.form.get('cust_id')),
-        "allot_staff": int(request.form.get('allot_staff')) if request.form.get('allot_staff') else None,
-        "call_type": request.form.get('call_type'),
-        "call_mode": request.form.get('call_mode'),
-        "call_details": request.form.get('call_details'),
-        "call_contact": request.form.get('call_contact'),
-        "call_date": request.form.get('call_date')
-    }
-    supabase.table('calls').insert(data).execute()
-    return redirect(url_for('dashboard'))
+# 3. Add Customer API / Form Action
+@app.route('/add-customer', methods=['POST'])
+def add_customer():
+    try:
+        data = request.form
+        customer_name = data.get('customer')
+        mobile = data.get('mobile')
+        cust_type = data.get('cust_type', 'Live')
 
-@app.route('/settings/lookup/save', methods=['POST'])
-def save_lookup():
-    category = request.form.get('category')
-    item_value = request.form.get('item_value')
-    supabase.table('app_lookups').insert({'category': category, 'item_value': item_value}).execute()
-    return redirect(url_for('dashboard'))
+        supabase.table('customers').insert({
+            'customer': customer_name,
+            'mobile': mobile,
+            'cust_type': cust_type
+        }).execute()
 
-@app.route('/api/call-metrics')
-def call_metrics():
-    calls = supabase.table('calls').select('call_type').execute().data
-    type_counts = {}
-    for c in calls:
-        t = c.get('call_type') or 'Unspecified'
-        type_counts[t] = type_counts.get(t, 0) + 1
-    return jsonify(type_counts)
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        return f"Error adding customer: {str(e)}", 400
+
+
+# 4. Log Complaint API / Form Action
+@app.route('/log-call', methods=['POST'])
+def log_call():
+    try:
+        data = request.form
+        cust_id = data.get('cust_id')
+        complaint = data.get('complaint')
+        allot_staff_id = data.get('allot_staff_id')
+        call_status = data.get('call_status', 'Pending')
+
+        supabase.table('calls').insert({
+            'cust_id': cust_id,
+            'complaint': complaint,
+            'allot_staff_id': allot_staff_id,
+            'call_status': call_status
+        }).execute()
+
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        return f"Error logging call: {str(e)}", 400
+
+
+# 5. AJAX Endpoint to Update Call Status from Staff Cards or Dashboard
+@app.route('/update-status', methods=['POST'])
+def update_status():
+    try:
+        payload = request.get_json()
+        call_id = payload.get('call_id')
+        new_status = payload.get('call_status')
+
+        supabase.table('calls').update({
+            'call_status': new_status
+        }).eq('call_id', call_id).execute()
+
+        return jsonify({'success': True, 'message': 'Status updated successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
