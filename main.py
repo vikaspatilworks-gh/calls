@@ -21,6 +21,29 @@ def dashboard():
     return render_template('index.html', lookups=lookups, staff=staff_list, customers=customers, calls=recent_calls)
 
 @app.route('/customers/save', methods=['POST'])
+@app.route('/')
+
+def dashboard():
+    lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
+    staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
+    
+    # Query including call_status
+    recent_calls = supabase.table('calls').select(
+        'call_id, complaint, call_status, created_at, customers(customer, mobile), staff(staffname)'
+    ).order('created_at', desc=True).limit(50).execute().data
+    
+    return render_template('index.html', lookups=lookups, staff=staff_list, calls=recent_calls)
+
+@app.route('/staff-cards')
+
+def staff_cards():
+    lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
+    staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
+    calls = supabase.table('calls').select(
+        'call_id, complaint, call_status, allot_staff_id, customers(customer, mobile)'
+    ).execute().data
+    return render_template('staff_cards.html', staff=staff_list, calls=calls, lookups=lookups)
+
 def save_customer():
     data = {
         "customer": request.form.get('customer'),
