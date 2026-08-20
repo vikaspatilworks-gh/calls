@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Service Call Management System</title>
+  <title>Call Support & Dispatch System</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <style>
-    body { background-color: #f4f6f9; }
+    body { background-color: #f1f5f9; font-size: 0.92rem; }
     
     /* Exact Call Status Colors */
     .row-pending { background-color: #ffe6e6 !important; }   /* Light Red */
@@ -15,408 +15,631 @@
     .row-complete { background-color: #dcfce7 !important; }  /* Green */
     .row-other { background-color: #fef9c3 !important; }     /* Yellow */
 
-    .badge-pending { background-color: #dc3545; color: #fff; }
-    .badge-running { background-color: #0d6efd; color: #fff; }
-    .badge-complete { background-color: #198754; color: #fff; }
-    .badge-other { background-color: #ffc107; color: #000; }
+    .clickable-row { cursor: pointer; }
+    .clickable-row:hover { filter: brightness(0.96); }
+    .badge-today-complete { background-color: #198754; cursor: pointer; font-size: 0.85rem; }
+    .card-header-staff { background: #ffffff; border-bottom: 2px solid #e2e8f0; }
+    .card-header-admin-queue { background: #fff1f2; border-bottom: 2px solid #fecdd3; }
+    .card-header-open-queue { background: #f0fdf4; border-bottom: 2px solid #bbf7d0; }
   </style>
 </head>
-<body class="p-3 p-md-4">
+<body class="p-2 p-md-4">
   <div class="container-fluid">
 
-    <!-- Top Action Navigation Bar -->
+    <!-- Top Action Navbar -->
     <div class="bg-white p-3 rounded shadow-sm mb-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
       <div>
-        <h4 class="mb-0 fw-bold text-primary"><i class="bi bi-headset me-2"></i>Call Support System</h4>
-        <span class="badge bg-secondary">User: {{ current_user.display_name }} ({{ current_user.role|upper }})</span>
+        <h4 class="mb-0 fw-bold text-primary"><i class="bi bi-headset me-2"></i>Service Call Board</h4>
+        <small class="text-muted">User: <strong class="text-dark">{{ current_user.display_name }}</strong> ({{ current_user.role|upper }})</small>
       </div>
 
-      <!-- Action & Data Entry Buttons -->
+      <!-- Action Buttons for Data Entry -->
       <div class="d-flex flex-wrap gap-2">
-        <button class="btn btn-primary btn-sm" onclick="openCallModal()">
-          <i class="bi bi-telephone-plus me-1"></i> New Call
+        <button class="btn btn-primary btn-sm shadow-sm" onclick="openCallEntryModal()">
+          <i class="bi bi-telephone-plus-fill me-1"></i> New Call
         </button>
-        <button class="btn btn-success btn-sm" onclick="openCustomerModal()">
-          <i class="bi bi-person-plus me-1"></i> New Customer
+        <button class="btn btn-success btn-sm shadow-sm" onclick="openCustomerEntryModal()">
+          <i class="bi bi-person-plus-fill me-1"></i> New Customer
         </button>
-        
         {% if current_user.role == 'admin' %}
-        <button class="btn btn-dark btn-sm" onclick="openStaffModal()">
-          <i class="bi bi-person-badge-fill me-1"></i> New User / Staff (Admin)
+        <button class="btn btn-dark btn-sm shadow-sm" onclick="openStaffEntryModal()">
+          <i class="bi bi-shield-lock-fill me-1"></i> User / Staff Admin
         </button>
         {% endif %}
-
         <a href="/logout" class="btn btn-outline-danger btn-sm">
           <i class="bi bi-box-arrow-right"></i> Logout
         </a>
       </div>
     </div>
 
-    <!-- Staff-wise Grouped Tables -->
-    <h5 class="fw-bold mb-3 text-secondary"><i class="bi bi-people-fill me-2"></i>Staff Call Schedule & Progress</h5>
-
-    {% for s in staff_groups %}
+    <!-- 1. Special Queue: Unassigned Admin Queue -->
     <div class="card shadow-sm border-0 mb-4">
-      <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+      <div class="card-header card-header-admin-queue py-2 d-flex justify-content-between align-items-center">
         <div>
-          <span class="fs-5 fw-bold text-dark"><i class="bi bi-person-circle text-primary me-2"></i>{{ s.staffname }}</span>
-          <span class="text-muted ms-3"><i class="bi bi-telephone me-1"></i>{{ s.mobile }}</span>
+          <span class="fw-bold text-danger"><i class="bi bi-shield-exclamation me-2"></i>Unassigned Admin Calls</span>
+          <small class="text-muted ms-2">(Direct Admin Delegations)</small>
         </div>
-        <span class="badge bg-primary rounded-pill">{{ s.calls|length }} Active/Today</span>
+        <div>
+          <span class="badge badge-today-complete" onclick='showCompletedModal("Admin Queue", {{ unassigned_admin.completed_calls|tojson }})'>
+            Today Completed: {{ unassigned_admin.completed_count }} <i class="bi bi-eye ms-1"></i>
+          </span>
+          <span class="badge bg-danger ms-2">{{ unassigned_admin.calls|length }} Active</span>
+        </div>
       </div>
       <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-bordered align-middle mb-0">
-            <thead class="table-light">
-              <tr class="small text-muted">
-                <th style="width: 50px;">#</th>
-                <th style="width: 250px;">Party Name (Customer)</th>
-                <th>Address</th>
-                <th>Call / Problem</th>
-                <th style="width: 170px;">Call Status</th>
-                <th style="width: 90px;" class="text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% if s.calls and s.calls|length > 0 %}
-                {% for call in s.calls %}
-                  {% set st = (call.status_clean or 'Pending')|lower %}
-                  <tr class="{% if st == 'complete' or st == 'completed' %}row-complete{% elif st == 'running' %}row-running{% elif st == 'other' %}row-other{% else %}row-pending{% endif %}">
-                    <td class="fw-bold text-center">{{ loop.index }}</td>
-                    <td class="fw-semibold">
-                      {{ call.customer_name }}
-                      {% if call.cust_mobile and call.cust_mobile != '-' %}
-                        <br><small><a href="tel:{{ call.cust_mobile }}" class="text-decoration-none text-dark"><i class="bi bi-telephone-fill text-primary"></i> {{ call.cust_mobile }}</a></small>
-                      {% endif %}
-                    </td>
-                    <td>{{ call.address }}</td>
-                    <td>{{ call.complaint }}</td>
-                    <td>
-                      <!-- Inline Quick Status Dropdown -->
-                      <select class="form-select form-select-sm fw-semibold" onchange="quickUpdateStatus('{{ call.call_id }}', this.value)">
-                        <option value="Pending" {% if st == 'pending' %}selected{% endif %}>Pending</option>
-                        <option value="Running" {% if st == 'running' %}selected{% endif %}>Running</option>
-                        <option value="Complete" {% if st == 'complete' or st == 'completed' %}selected{% endif %}>Complete</option>
-                        <option value="Other" {% if st == 'other' %}selected{% endif %}>Other</option>
-                      </select>
-                    </td>
-                    <td class="text-center">
-                      <button class="btn btn-sm btn-outline-dark" onclick='editCallRecord({{ call|tojson }})' title="Edit Full Call">
-                        <i class="bi bi-pencil-square"></i>
-                      </button>
-                    </td>
-                  </tr>
-                {% endfor %}
-              {% else %}
-                <tr>
-                  <td colspan="6" class="text-center py-3 text-muted">
-                    No active or pending calls assigned.
-                  </td>
-                </tr>
-              {% endif %}
-            </tbody>
-          </table>
+        {{ render_call_table(unassigned_admin.calls) }}
+      </div>
+    </div>
+
+    <!-- 2. Special Queue: Unassigned Open Calls -->
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header card-header-open-queue py-2 d-flex justify-content-between align-items-center">
+        <div>
+          <span class="fw-bold text-success"><i class="bi bi-inbox-fill me-2"></i>Unassigned Open Calls</span>
+          <small class="text-muted ms-2">(Available for Any Engineer)</small>
         </div>
+        <div>
+          <span class="badge badge-today-complete" onclick='showCompletedModal("Open Queue", {{ unassigned_open.completed_calls|tojson }})'>
+            Today Completed: {{ unassigned_open.completed_count }} <i class="bi bi-eye ms-1"></i>
+          </span>
+          <span class="badge bg-success ms-2">{{ unassigned_open.calls|length }} Active</span>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        {{ render_call_table(unassigned_open.calls) }}
+      </div>
+    </div>
+
+    <!-- 3. Staff-Wise Call Tables -->
+    <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-people-fill me-2"></i>Staff Working Desks</h5>
+    
+    {% for s in staff_groups %}
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-header card-header-staff py-2 d-flex justify-content-between align-items-center">
+        <div>
+          <span class="fw-bold text-dark fs-6"><i class="bi bi-person-fill text-primary me-1"></i>{{ s.staffname }}</span>
+          <span class="text-muted ms-3 small"><i class="bi bi-telephone-fill me-1"></i>{{ s.mobile }}</span>
+        </div>
+        <div>
+          <span class="badge badge-today-complete" onclick='showCompletedModal("{{ s.staffname }}", {{ s.completed_calls|tojson }})'>
+            Today Completed: {{ s.completed_count }} <i class="bi bi-eye ms-1"></i>
+          </span>
+          <span class="badge bg-primary ms-2">{{ s.active_calls|length }} Active</span>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        {{ render_call_table(s.active_calls) }}
       </div>
     </div>
     {% endfor %}
 
   </div>
 
-  <!-- ==================== MODALS (ENTRY + SEARCH + EDIT) ==================== -->
+  <!-- MACRO: Render Call Table -->
+  {% macro render_call_table(calls_list) %}
+  <div class="table-responsive">
+    <table class="table table-bordered align-middle mb-0">
+      <thead class="table-light small">
+        <tr>
+          <th style="width: 40px;">#</th>
+          <th>Party Name</th>
+          <th>Address</th>
+          <th>Call Back No.</th>
+          <th>Sub Call Type</th>
+          <th>Problem Details</th>
+          <th style="width: 140px;">Call Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if calls_list and calls_list|length > 0 %}
+          {% for call in calls_list %}
+            {% set st = (call.status_clean or 'Pending')|lower %}
+            <tr class="clickable-row {% if st == 'complete' or st == 'completed' %}row-complete{% elif st == 'running' %}row-running{% elif st == 'other' %}row-other{% else %}row-pending{% endif %}">
+              <td class="fw-bold text-center small" onclick='editCallDetails({{ call|tojson }})'>{{ loop.index }}</td>
+              <td class="fw-bold text-dark" onclick='editCallDetails({{ call|tojson }})'>{{ call.customer_name }}</td>
+              <td class="small" onclick='editCallDetails({{ call|tojson }})'>{{ call.address }}</td>
+              <td class="small" onclick='editCallDetails({{ call|tojson }})'>
+                {% if call.callback_number or call.cust_mobile %}
+                  <a href="tel:{{ call.callback_number or call.cust_mobile }}" class="text-decoration-none text-dark fw-bold" onclick="event.stopPropagation();">
+                    <i class="bi bi-telephone-outbound text-primary me-1"></i>{{ call.callback_number or call.cust_mobile }}
+                  </a>
+                {% else %}-{% endif %}
+              </td>
+              <td class="small" onclick='editCallDetails({{ call|tojson }})'>{{ call.call_subtype or '-' }}</td>
+              <td class="small" onclick='editCallDetails({{ call|tojson }})'>{{ call.complaint }}</td>
+              <td>
+                <select class="form-select form-select-sm fw-semibold" onchange="quickUpdateStatus('{{ call.call_id }}', this.value)">
+                  <option value="Pending" {% if st == 'pending' %}selected{% endif %}>Pending</option>
+                  <option value="Running" {% if st == 'running' %}selected{% endif %}>Running</option>
+                  <option value="Complete" {% if st == 'complete' or st == 'completed' %}selected{% endif %}>Complete</option>
+                  <option value="Other" {% if st == 'other' %}selected{% endif %}>Other</option>
+                </select>
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="7" class="text-center py-3 text-muted small">No calls in this section.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% endmacro %}
 
-  <!-- 1. Call Entry / Edit Modal -->
-  <div class="modal fade" id="callModal" tabindex="-1">
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. Call Entry & Detailed View Modal -->
+  <div class="modal fade" id="callEntryModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
       <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="callModalTitle">Log / Edit Call</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <div class="input-group mb-3">
-            <input type="text" id="callSearchInput" class="form-control" placeholder="Search complaint text to edit existing...">
-            <button class="btn btn-outline-secondary" onclick="searchCalls()"><i class="bi bi-search"></i> Search</button>
+        <div class="modal-header py-2 bg-light">
+          <h6 class="modal-title fw-bold" id="callModalTitle"><i class="bi bi-telephone-plus me-1"></i> Call Entry & Details</h6>
+          <div class="d-flex align-items-center gap-2">
+            <!-- View All Data Button -->
+            <button class="btn btn-outline-secondary btn-sm" onclick="showMasterTableModal('call')"><i class="bi bi-table me-1"></i> View All Calls</button>
+            <!-- Field Visibility Settings Gear -->
+            <button class="btn btn-outline-dark btn-sm" onclick="toggleSettingsPanel('callFieldSettings')"><i class="bi bi-gear-fill"></i></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
-          <div id="callSearchResults" class="list-group mb-3 d-none"></div>
+        </div>
+        
+        <!-- Field Setting Toggle Dropdown -->
+        <div id="callFieldSettings" class="p-3 bg-light border-bottom d-none">
+          <h6 class="fw-bold small mb-2">Show / Hide Entry Fields:</h6>
+          <div class="d-flex flex-wrap gap-3 small">
+            <label><input type="checkbox" checked onchange="toggleField('cf_datetime', this.checked)"> Date & Time</label>
+            <label><input type="checkbox" checked onchange="toggleField('cf_callstaff', this.checked)"> Call Staff</label>
+            <label><input type="checkbox" checked onchange="toggleField('cf_calltype', this.checked)"> Call Type</label>
+            <label><input type="checkbox" checked onchange="toggleField('cf_callsubtype', this.checked)"> Subtype</label>
+            <label><input type="checkbox" checked onchange="toggleField('cf_callback', this.checked)"> Callback No.</label>
+            <label><input type="checkbox" checked onchange="toggleField('cf_queue', this.checked)"> Queue / Assign</label>
+          </div>
+        </div>
 
+        <div class="modal-body">
           <form id="callForm">
             <input type="hidden" id="call_id">
-            <div class="mb-3">
-              <label class="form-label">Customer / Party</label>
-              <select id="call_cust_id" class="form-select" required>
+
+            <div class="row g-2 mb-2">
+              <div class="col-md-6" id="cf_datetime">
+                <label class="form-label small fw-bold">Date & Time</label>
+                <div class="input-group input-group-sm">
+                  <input type="date" id="call_date" class="form-control" value="{{ current_time_info.date }}">
+                  <input type="time" id="call_time" class="form-control" value="{{ current_time_info.time }}">
+                </div>
+              </div>
+              <div class="col-md-6" id="cf_callstaff">
+                <label class="form-label small fw-bold">Call Staff (Logger)</label>
+                <input type="text" id="call_staff_name" class="form-control form-control-sm bg-light" value="{{ current_user.display_name }}" readonly>
+              </div>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Customer / Party Name *</label>
+              <select id="call_cust_id" class="form-select form-select-sm" required>
                 <option value="">-- Select Party --</option>
                 {% for c in customers %}
-                  <option value="{{ c.cust_id }}">{{ c.customer }} ({{ c.mobile }})</option>
+                  <option value="{{ c.cust_id }}">{{ c.customer }} | {{ c.mobile }} ({{ c.city or c.address }})</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Assigned Staff</label>
-              <select id="call_allot_staff_id" class="form-select">
-                <option value="">-- Unassigned --</option>
-                {% for st in staff_list %}
-                  <option value="{{ st.staff_id }}">{{ st.staffname }}</option>
-                {% endfor %}
-              </select>
+
+            <div class="row g-2 mb-2">
+              <div class="col-md-4" id="cf_calltype">
+                <label class="form-label small fw-bold">Call Type</label>
+                <input type="text" id="call_type" class="form-control form-control-sm" placeholder="e.g. Service, Inquiry, Hardware">
+              </div>
+              <div class="col-md-4" id="cf_callsubtype">
+                <label class="form-label small fw-bold">Call Subtype</label>
+                <input type="text" id="call_subtype" class="form-control form-control-sm" placeholder="e.g. Printer, Network, OS">
+              </div>
+              <div class="col-md-4" id="cf_callback">
+                <label class="form-label small fw-bold">Callback Number</label>
+                <input type="text" id="call_callback_number" class="form-control form-control-sm" placeholder="Mobile / Landline">
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Call / Problem Description</label>
-              <textarea id="call_complaint" class="form-control" rows="3" required></textarea>
+
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Call / Complaint Details *</label>
+              <textarea id="call_complaint" class="form-control form-control-sm" rows="3" required placeholder="Describe full issue details..."></textarea>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Call Status</label>
-              <select id="call_status" class="form-select">
-                <option value="Pending">Pending</option>
-                <option value="Running">Running</option>
-                <option value="Complete">Complete</option>
-                <option value="Other">Other</option>
-              </select>
+
+            <div class="row g-2 mb-2" id="cf_queue">
+              <div class="col-md-4">
+                <label class="form-label small fw-bold">Queue / Allotment Type</label>
+                <select id="call_queue_type" class="form-select form-select-sm" onchange="handleQueueTypeChange(this.value)">
+                  <option value="open">Unassigned Open Calls</option>
+                  <option value="admin">Unassigned Admin Calls</option>
+                  <option value="staff">Assign Directly to Staff</option>
+                </select>
+              </div>
+              <div class="col-md-4" id="staffAssignBox" style="display: none;">
+                <label class="form-label small fw-bold">Select Staff</label>
+                <select id="call_allot_staff_id" class="form-select form-select-sm">
+                  <option value="">-- Choose Staff Member --</option>
+                  {% for st in staff_list %}
+                    <option value="{{ st.staff_id }}">{{ st.staffname }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small fw-bold">Call Status</label>
+                <select id="call_status" class="form-select form-select-sm fw-bold">
+                  <option value="Pending">Pending</option>
+                  <option value="Running">Running</option>
+                  <option value="Complete">Complete</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
             </div>
           </form>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="button" class="btn btn-primary" onclick="submitCall()">Save Record</button>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary btn-sm px-3" onclick="submitCallForm()">Save Call Record</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 2. Customer Entry / Edit Modal -->
-  <div class="modal fade" id="customerModal" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">New / Edit Customer</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <div class="input-group mb-3">
-            <input type="text" id="custSearchInput" class="form-control" placeholder="Search customer name...">
-            <button class="btn btn-outline-secondary" onclick="searchCustomers()"><i class="bi bi-search"></i> Search</button>
-          </div>
-          <div id="custSearchResults" class="list-group mb-3 d-none"></div>
 
-          <form id="custForm">
+  <!-- 2. Customer Entry Modal -->
+  <div class="modal fade" id="customerEntryModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header py-2 bg-light">
+          <h6 class="modal-title fw-bold"><i class="bi bi-person-plus me-1"></i> Customer Data Entry</h6>
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" onclick="showMasterTableModal('customer')"><i class="bi bi-table me-1"></i> View All Customers</button>
+            <button class="btn btn-outline-dark btn-sm" onclick="toggleSettingsPanel('custFieldSettings')"><i class="bi bi-gear-fill"></i></button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+        </div>
+
+        <div id="custFieldSettings" class="p-3 bg-light border-bottom d-none">
+          <h6 class="fw-bold small mb-2">Show / Hide Fields:</h6>
+          <div class="d-flex flex-wrap gap-3 small">
+            <label><input type="checkbox" checked onchange="toggleField('cuf_contact', this.checked)"> Contact Person</label>
+            <label><input type="checkbox" checked onchange="toggleField('cuf_email', this.checked)"> Email</label>
+            <label><input type="checkbox" checked onchange="toggleField('cuf_city', this.checked)"> City</label>
+            <label><input type="checkbox" checked onchange="toggleField('cuf_type', this.checked)"> Cust Type</label>
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <form id="customerForm">
             <input type="hidden" id="cust_id">
-            <div class="mb-3">
-              <label class="form-label">Party / Customer Name</label>
-              <input type="text" id="cust_name" class="form-control" required>
+            <div class="row g-2 mb-2">
+              <div class="col-md-6">
+                <label class="form-label small fw-bold">Customer / Party Name *</label>
+                <input type="text" id="cust_customer" class="form-control form-control-sm" required>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small fw-bold">Mobile Number *</label>
+                <input type="text" id="cust_mobile" class="form-control form-control-sm" required>
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Mobile Number</label>
-              <input type="text" id="cust_mobile" class="form-control">
+            <div class="row g-2 mb-2">
+              <div class="col-md-6" id="cuf_contact">
+                <label class="form-label small fw-bold">Contact Person</label>
+                <input type="text" id="cust_contact_person" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-6" id="cuf_email">
+                <label class="form-label small fw-bold">Email</label>
+                <input type="email" id="cust_email" class="form-control form-control-sm">
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Address</label>
-              <textarea id="cust_address" class="form-control" rows="2"></textarea>
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Full Address</label>
+              <textarea id="cust_address" class="form-control form-control-sm" rows="2"></textarea>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Customer Type</label>
-              <select id="cust_type" class="form-select">
-                <option value="Live">Live</option>
-                <option value="Demo">Demo</option>
-              </select>
+            <div class="row g-2">
+              <div class="col-md-6" id="cuf_city">
+                <label class="form-label small fw-bold">City</label>
+                <input type="text" id="cust_city" class="form-control form-control-sm">
+              </div>
+              <div class="col-md-6" id="cuf_type">
+                <label class="form-label small fw-bold">Customer Type</label>
+                <select id="cust_type" class="form-select form-select-sm">
+                  <option value="Live">Live</option>
+                  <option value="Demo">Demo</option>
+                </select>
+              </div>
             </div>
           </form>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="button" class="btn btn-success" onclick="submitCustomer()">Save Customer</button>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-success btn-sm px-3" onclick="submitCustomerForm()">Save Customer</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 3. Staff / User Entry Modal (Admin Only) -->
+
+  <!-- 3. Staff Entry Modal (Admin Only) -->
   {% if current_user.role == 'admin' %}
-  <div class="modal fade" id="staffModal" tabindex="-1">
+  <div class="modal fade" id="staffEntryModal" tabindex="-1">
     <div class="modal-dialog">
       <div class="modal-content">
-        <div class="modal-header bg-dark text-white">
-          <h5 class="modal-title">New / Edit Staff & Login (Admin)</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <div class="modal-header py-2 bg-dark text-white">
+          <h6 class="modal-title fw-bold"><i class="bi bi-shield-lock me-1"></i> User & Staff Management</h6>
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-light btn-sm" onclick="showMasterTableModal('staff')"><i class="bi bi-table me-1"></i> View All</button>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
         </div>
         <div class="modal-body">
-          <div class="input-group mb-3">
-            <input type="text" id="staffSearchInput" class="form-control" placeholder="Search staff name...">
-            <button class="btn btn-outline-secondary" onclick="searchStaff()"><i class="bi bi-search"></i> Search</button>
-          </div>
-          <div id="staffSearchResults" class="list-group mb-3 d-none"></div>
-
           <form id="staffForm">
             <input type="hidden" id="staff_id">
-            <div class="mb-3">
-              <label class="form-label">Staff Name</label>
-              <input type="text" id="staff_name" class="form-control" required>
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Staff Name *</label>
+              <input type="text" id="staff_name" class="form-control form-control-sm" required>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Mobile Number</label>
-              <input type="text" id="staff_mobile" class="form-control">
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Mobile Number</label>
+              <input type="text" id="staff_mobile" class="form-control form-control-sm">
             </div>
-            <div class="mb-3">
-              <label class="form-label">Login Username</label>
-              <input type="text" id="staff_username" class="form-control" required>
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Login Username *</label>
+              <input type="text" id="staff_username" class="form-control form-control-sm" required>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Login Password</label>
-              <input type="text" id="staff_password" class="form-control" required>
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Login Password *</label>
+              <input type="text" id="staff_password" class="form-control form-control-sm" required>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Role</label>
-              <select id="staff_role" class="form-select">
+            <div class="mb-2">
+              <label class="form-label small fw-bold">Role</label>
+              <select id="staff_role" class="form-select form-select-sm">
                 <option value="staff">Staff</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
           </form>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-          <button type="button" class="btn btn-dark" onclick="submitStaff()">Save Staff</button>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-dark btn-sm px-3" onclick="submitStaffForm()">Save Staff User</button>
         </div>
       </div>
     </div>
   </div>
   {% endif %}
 
-  <!-- Bootstrap & Front-End Actions JS -->
+
+  <!-- 4. Universal Master Data Viewer Table Modal -->
+  <div class="modal fade" id="masterTableModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header py-2 bg-light">
+          <h6 class="modal-title fw-bold" id="masterTableTitle"><i class="bi bi-table me-1"></i> Master Records</h6>
+          <div class="d-flex align-items-center gap-2">
+            <input type="text" id="masterSearchBox" class="form-control form-control-sm" placeholder="Instant Search..." onkeyup="filterMasterTable()">
+            <button class="btn btn-outline-dark btn-sm" onclick="toggleSettingsPanel('masterColumnSettings')"><i class="bi bi-gear-fill"></i> Columns</button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+        </div>
+        <div id="masterColumnSettings" class="p-3 bg-light border-bottom d-none">
+          <h6 class="fw-bold small mb-2">Show / Hide Table Columns:</h6>
+          <div id="masterColumnCheckboxes" class="d-flex flex-wrap gap-3 small"></div>
+        </div>
+        <div class="modal-body p-0">
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover small mb-0" id="masterDataTable">
+              <thead class="table-dark" id="masterTableHead"></thead>
+              <tbody id="masterTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 5. Today's Completed Calls Popup Modal -->
+  <div class="modal fade" id="completedCallsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header py-2 bg-success text-white">
+          <h6 class="modal-title fw-bold" id="completedModalTitle"><i class="bi bi-check-all me-1"></i> Today's Completed Calls</h6>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover table-bordered small mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>#</th>
+                  <th>Customer</th>
+                  <th>Callback No.</th>
+                  <th>Subtype</th>
+                  <th>Problem / Complaint</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody id="completedCallsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- JS Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    const callModal = new bootstrap.Modal(document.getElementById('callModal'));
-    const customerModal = new bootstrap.Modal(document.getElementById('customerModal'));
+    const callModal = new bootstrap.Modal(document.getElementById('callEntryModal'));
+    const customerModal = new bootstrap.Modal(document.getElementById('customerEntryModal'));
+    const masterModal = new bootstrap.Modal(document.getElementById('masterTableModal'));
+    const completedModal = new bootstrap.Modal(document.getElementById('completedCallsModal'));
     {% if current_user.role == 'admin' %}
-    const staffModal = new bootstrap.Modal(document.getElementById('staffModal'));
+    const staffModal = new bootstrap.Modal(document.getElementById('staffEntryModal'));
     {% endif %}
 
-    function openCallModal() {
+    // --- Modal Openers & Resets ---
+    function openCallEntryModal() {
       document.getElementById('callForm').reset();
       document.getElementById('call_id').value = '';
-      document.getElementById('callSearchResults').classList.add('d-none');
+      document.getElementById('callModalTitle').innerText = 'New Call Entry';
+      document.getElementById('call_date').value = "{{ current_time_info.date }}";
+      document.getElementById('call_time').value = "{{ current_time_info.time }}";
+      document.getElementById('call_staff_name').value = "{{ current_user.display_name }}";
+      handleQueueTypeChange('open');
       callModal.show();
     }
 
-    function openCustomerModal() {
-      document.getElementById('custForm').reset();
+    function openCustomerEntryModal() {
+      document.getElementById('customerForm').reset();
       document.getElementById('cust_id').value = '';
-      document.getElementById('custSearchResults').classList.add('d-none');
       customerModal.show();
     }
 
-    function openStaffModal() {
+    function openStaffEntryModal() {
       {% if current_user.role == 'admin' %}
       document.getElementById('staffForm').reset();
       document.getElementById('staff_id').value = '';
-      document.getElementById('staffSearchResults').classList.add('d-none');
       staffModal.show();
       {% endif %}
     }
 
-    // --- Search Handlers ---
-    async function searchCustomers() {
-      const term = document.getElementById('custSearchInput').value;
-      const res = await fetch(`/api/search/customer?term=${encodeURIComponent(term)}`);
-      const result = await res.json();
-      const container = document.getElementById('custSearchResults');
-      container.innerHTML = '';
-      if(result.data && result.data.length > 0) {
-        result.data.forEach(c => {
-          const a = document.createElement('a');
-          a.className = 'list-group-item list-group-item-action';
-          a.innerHTML = `<strong>${c.customer}</strong> | ${c.mobile || '-'} <small class="text-muted">(${c.address || ''})</small>`;
-          a.onclick = () => {
-            document.getElementById('cust_id').value = c.cust_id;
-            document.getElementById('cust_name').value = c.customer;
-            document.getElementById('cust_mobile').value = c.mobile || '';
-            document.getElementById('cust_address').value = c.address || '';
-            document.getElementById('cust_type').value = c.cust_type || 'Live';
-            container.classList.add('d-none');
-          };
-          container.appendChild(a);
-        });
-        container.classList.remove('d-none');
+    function handleQueueTypeChange(val) {
+      const box = document.getElementById('staffAssignBox');
+      if (val === 'staff') {
+        box.style.display = 'block';
       } else {
-        container.innerHTML = '<div class="list-group-item text-muted">No records found</div>';
-        container.classList.remove('d-none');
+        box.style.display = 'none';
+        document.getElementById('call_allot_staff_id').value = '';
       }
     }
 
-    async function searchStaff() {
-      const term = document.getElementById('staffSearchInput').value;
-      const res = await fetch(`/api/search/staff?term=${encodeURIComponent(term)}`);
-      const result = await res.json();
-      const container = document.getElementById('staffSearchResults');
-      container.innerHTML = '';
-      if(result.data && result.data.length > 0) {
-        result.data.forEach(st => {
-          const a = document.createElement('a');
-          a.className = 'list-group-item list-group-item-action';
-          a.innerHTML = `<strong>${st.staffname}</strong> | @${st.username || '-'} (${st.role || 'staff'})`;
-          a.onclick = () => {
-            document.getElementById('staff_id').value = st.staff_id;
-            document.getElementById('staff_name').value = st.staffname;
-            document.getElementById('staff_mobile').value = st.mobile || '';
-            document.getElementById('staff_username').value = st.username || '';
-            document.getElementById('staff_password').value = st.password || '';
-            document.getElementById('staff_role').value = st.role || 'staff';
-            container.classList.add('d-none');
-          };
-          container.appendChild(a);
-        });
-        container.classList.remove('d-none');
-      }
+    // --- Toggle Settings Panel & Fields ---
+    function toggleSettingsPanel(id) {
+      document.getElementById(id).classList.toggle('d-none');
     }
 
-    async function searchCalls() {
-      const term = document.getElementById('callSearchInput').value;
-      const res = await fetch(`/api/search/call?term=${encodeURIComponent(term)}`);
-      const result = await res.json();
-      const container = document.getElementById('callSearchResults');
-      container.innerHTML = '';
-      if(result.data && result.data.length > 0) {
-        result.data.forEach(cl => {
-          const a = document.createElement('a');
-          a.className = 'list-group-item list-group-item-action';
-          a.innerHTML = `<strong>#${cl.call_id}</strong> - ${cl.complaint} <span class="badge bg-secondary">${cl.call_status}</span>`;
-          a.onclick = () => {
-            editCallRecord(cl);
-            container.classList.add('d-none');
-          };
-          container.appendChild(a);
-        });
-        container.classList.remove('d-none');
-      }
+    function toggleField(elementId, isVisible) {
+      const el = document.getElementById(elementId);
+      if (el) el.style.display = isVisible ? '' : 'none';
     }
 
-    function editCallRecord(c) {
-      document.getElementById('call_id').value = c.call_id;
-      document.getElementById('call_cust_id').value = c.cust_id;
-      document.getElementById('call_allot_staff_id').value = c.allot_staff_id || '';
-      document.getElementById('call_complaint').value = c.complaint || '';
-      document.getElementById('call_status').value = c.call_status || 'Pending';
+    // --- Detailed Edit Call on Row Click ---
+    function editCallDetails(call) {
+      document.getElementById('callModalTitle').innerText = 'Call Details & Edit (#' + call.call_id + ')';
+      document.getElementById('call_id').value = call.call_id;
+      document.getElementById('call_date').value = (call.call_date || call.created_at || '').substring(0, 10);
+      document.getElementById('call_time').value = (call.call_time || (call.created_at ? call.created_at.substring(11, 16) : ''));
+      document.getElementById('call_staff_name').value = call.call_staff_name || '{{ current_user.display_name }}';
+      document.getElementById('call_cust_id').value = call.cust_id || '';
+      document.getElementById('call_type').value = call.call_type || '';
+      document.getElementById('call_subtype').value = call.call_subtype || '';
+      document.getElementById('call_callback_number').value = call.callback_number || call.cust_mobile || '';
+      document.getElementById('call_complaint').value = call.complaint || '';
+      document.getElementById('call_status').value = call.call_status || 'Pending';
+
+      if (call.allot_staff_id) {
+        document.getElementById('call_queue_type').value = 'staff';
+        handleQueueTypeChange('staff');
+        document.getElementById('call_allot_staff_id').value = call.allot_staff_id;
+      } else if (call.is_admin_queue) {
+        document.getElementById('call_queue_type').value = 'admin';
+        handleQueueTypeChange('admin');
+      } else {
+        document.getElementById('call_queue_type').value = 'open';
+        handleQueueTypeChange('open');
+      }
+
       callModal.show();
     }
 
-    // --- Save Handlers ---
-    async function submitCustomer() {
-      const payload = {
-        cust_id: document.getElementById('cust_id').value || null,
-        customer: document.getElementById('cust_name').value,
-        mobile: document.getElementById('cust_mobile').value,
-        address: document.getElementById('cust_address').value,
-        cust_type: document.getElementById('cust_type').value
-      };
-      const res = await fetch('/api/save-customer', {
+    // --- Completed Calls Popup ---
+    function showCompletedModal(title, calls) {
+      document.getElementById('completedModalTitle').innerText = `Today's Completed Calls - ${title} (${calls.length})`;
+      const tbody = document.getElementById('completedCallsTableBody');
+      tbody.innerHTML = '';
+      if (!calls || calls.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted">No completed calls recorded today.</td></tr>';
+      } else {
+        calls.forEach((c, idx) => {
+          tbody.innerHTML += `
+            <tr class="clickable-row" onclick='editCallDetails(${JSON.stringify(c)})'>
+              <td>${idx + 1}</td>
+              <td class="fw-bold">${c.customer_name}</td>
+              <td>${c.callback_number || c.cust_mobile || '-'}</td>
+              <td>${c.call_subtype || '-'}</td>
+              <td>${c.complaint}</td>
+              <td>${(c.call_time || '').substring(0, 5)}</td>
+            </tr>
+          `;
+        });
+      }
+      completedModal.show();
+    }
+
+    // --- Quick Inline Status Update ---
+    async function quickUpdateStatus(call_id, status) {
+      const res = await fetch('/api/quick-status', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
+        body: JSON.stringify({call_id: call_id, call_status: status})
       });
       const data = await res.json();
       if(data.success) { location.reload(); } else { alert(data.error); }
     }
 
-    async function submitStaff() {
+    // --- Save Handlers ---
+    async function submitCallForm() {
+      const payload = {
+        call_id: document.getElementById('call_id').value || null,
+        call_date: document.getElementById('call_date').value,
+        call_time: document.getElementById('call_time').value,
+        cust_id: document.getElementById('call_cust_id').value,
+        call_type: document.getElementById('call_type').value,
+        call_subtype: document.getElementById('call_subtype').value,
+        callback_number: document.getElementById('call_callback_number').value,
+        complaint: document.getElementById('call_complaint').value,
+        queue_type: document.getElementById('call_queue_type').value,
+        allot_staff_id: document.getElementById('call_allot_staff_id').value,
+        call_status: document.getElementById('call_status').value
+      };
+      if (!payload.cust_id || !payload.complaint) {
+        alert("Please select a Customer and enter Call Details.");
+        return;
+      }
+      const res = await fetch('/api/save-call', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if(result.success) { location.reload(); } else { alert(result.error); }
+    }
+
+    async function submitCustomerForm() {
+      const payload = {
+        cust_id: document.getElementById('cust_id').value || null,
+        customer: document.getElementById('cust_customer').value,
+        mobile: document.getElementById('cust_mobile').value,
+        contact_person: document.getElementById('cust_contact_person').value,
+        email: document.getElementById('cust_email').value,
+        address: document.getElementById('cust_address').value,
+        city: document.getElementById('cust_city').value,
+        cust_type: document.getElementById('cust_type').value
+      };
+      if (!payload.customer || !payload.mobile) {
+        alert("Please enter Customer Name and Mobile Number.");
+        return;
+      }
+      const res = await fetch('/api/save-customer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if(result.success) { location.reload(); } else { alert(result.error); }
+    }
+
+    async function submitStaffForm() {
       const payload = {
         staff_id: document.getElementById('staff_id').value || null,
         staffname: document.getElementById('staff_name').value,
@@ -430,35 +653,73 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if(data.success) { location.reload(); } else { alert(data.error); }
+      const result = await res.json();
+      if(result.success) { location.reload(); } else { alert(result.error); }
     }
 
-    async function submitCall() {
-      const payload = {
-        call_id: document.getElementById('call_id').value || null,
-        cust_id: document.getElementById('call_cust_id').value,
-        allot_staff_id: document.getElementById('call_allot_staff_id').value,
-        complaint: document.getElementById('call_complaint').value,
-        call_status: document.getElementById('call_status').value
-      };
-      const res = await fetch('/api/save-call', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
+    // --- Master Data Table Viewer & Column Toggles ---
+    let currentMasterData = [];
+    let currentMasterColumns = [];
+
+    async function showMasterTableModal(entity) {
+      document.getElementById('masterTableTitle').innerHTML = `<i class="bi bi-table me-1"></i> Master ${entity.toUpperCase()} Records`;
+      const res = await fetch(`/api/master-data/${entity}`);
+      const json = await res.json();
+      if (!json.success || !json.data || json.data.length === 0) {
+        alert("No records found.");
+        return;
+      }
+      currentMasterData = json.data;
+      currentMasterColumns = Object.keys(currentMasterData[0]);
+
+      // Render Checkboxes
+      const cbContainer = document.getElementById('masterColumnCheckboxes');
+      cbContainer.innerHTML = '';
+      currentMasterColumns.forEach((col, idx) => {
+        cbContainer.innerHTML += `
+          <label><input type="checkbox" checked onchange="toggleMasterCol(${idx}, this.checked)"> ${col}</label>
+        `;
       });
-      const data = await res.json();
-      if(data.success) { location.reload(); } else { alert(data.error); }
+
+      renderMasterTable();
+      masterModal.show();
     }
 
-    // --- Quick Inline Status Update ---
-    async function quickUpdateStatus(call_id, status) {
-      await fetch('/api/update-status-inline', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({call_id: call_id, call_status: status})
+    function renderMasterTable() {
+      const thead = document.getElementById('masterTableHead');
+      const tbody = document.getElementById('masterTableBody');
+      
+      let headerHTML = '<tr>';
+      currentMasterColumns.forEach((col, idx) => {
+        headerHTML += `<th id="th_col_${idx}">${col}</th>`;
       });
-      location.reload();
+      headerHTML += '</tr>';
+      thead.innerHTML = headerHTML;
+
+      let bodyHTML = '';
+      currentMasterData.forEach(row => {
+        bodyHTML += '<tr>';
+        currentMasterColumns.forEach((col, idx) => {
+          bodyHTML += `<td class="td_col_${idx}">${row[col] !== null ? row[col] : '-'}</td>`;
+        });
+        bodyHTML += '</tr>';
+      });
+      tbody.innerHTML = bodyHTML;
+    }
+
+    function toggleMasterCol(colIdx, isChecked) {
+      const th = document.getElementById(`th_col_${colIdx}`);
+      const tds = document.querySelectorAll(`.td_col_${colIdx}`);
+      if (th) th.style.display = isChecked ? '' : 'none';
+      tds.forEach(td => td.style.display = isChecked ? '' : 'none');
+    }
+
+    function filterMasterTable() {
+      const q = document.getElementById('masterSearchBox').value.toLowerCase();
+      const rows = document.querySelectorAll('#masterTableBody tr');
+      rows.forEach(r => {
+        r.style.display = r.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
     }
   </script>
 </body>
