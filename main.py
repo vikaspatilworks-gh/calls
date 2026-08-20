@@ -3,13 +3,19 @@ from supabase import create_client, Client
 from functools import wraps
 from datetime import datetime, date
 import os
+from supabase import create_client, Client
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-change-in-prod-12345")
+# Replace with your actual credentials:
+REAL_URL = "https://mxaphksqgwmjtndboiqf.supabase.co"
+REAL_KEY = "sb_publishable_wuvUKqh_ExzFcRWv3GxbyA_RLwYTZO_"
 
-# --- Supabase Setup ---
-SUPABASE_URL = os.environ.get("https://mxaphksqgwmjtndboiqf.supabase.co")
-SUPABASE_KEY = os.environ.get("sb_publishable_wuvUKqh_ExzFcRWv3GxbyA_RLwYTZO_")
+SUPABASE_URL = os.environ.get("SUPABASE_URL") or REAL_URL
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or REAL_KEY
+
+# Ensure it is not empty before creating client
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must not be empty.")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
