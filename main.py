@@ -3,7 +3,8 @@ from supabase import create_client, Client
 from functools import wraps
 from datetime import datetime, date
 import os
-from supabase import create_client, Client
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "secret-key-12345")
 
 # Replace with your actual credentials:
 REAL_URL = "https://mxaphksqgwmjtndboiqf.supabase.co"
