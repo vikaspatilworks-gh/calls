@@ -45,20 +45,31 @@ def dashboard():
 @app.route('/staff-cards')
 def staff_cards():
     try:
+        # 1. Fetch lookups & staff list
         lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
         staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
-        calls = supabase.table('calls').select(
-            'call_id, complaint, call_status, allot_staff_id, cust_id, customers(customer, mobile)'
-        ).execute().data
         
+        # 2. Fetch calls and customers separately to avoid PostgREST join lookup crashes
+        calls_data = supabase.table('calls').select('*').order('created_at', desc=True).execute().data
+        customers_data = supabase.table('customers').select('cust_id, customer, mobile').execute().data
+
+        # Map customer info into a fast lookup dictionary
+        cust_map = {c['cust_id']: c for c in customers_data}
+
+        # Merge customer details into each call dictionary
+        for call in calls_data:
+            c_info = cust_map.get(call.get('cust_id'), {})
+            call['customer_name'] = c_info.get('customer', 'Unknown')
+            call['mobile'] = c_info.get('mobile', '')
+
         return render_template(
             'staff_cards.html',
             staff=staff_list,
-            calls=calls,
+            calls=calls_data,
             lookups=lookups
         )
     except Exception as e:
-        return f"Database error: {str(e)}", 500
+        return f"Database error in staff cards: {str(e)}", 500
 
 
 # 3. Add Customer API / Form Action
