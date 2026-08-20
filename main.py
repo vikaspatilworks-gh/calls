@@ -13,34 +13,39 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # 1. Main Dashboard Route
+# 1. Main Dashboard Route
+# 1. Main Dashboard Route
 @app.route('/')
 def dashboard():
     try:
-        # Fetch active lookup options (Complaint types, statuses, customer types, etc.)
+        # Fetch lookups, staff, and customers
         lookups = supabase.table('app_lookups').select('*').eq('is_active', True).execute().data
-        
-        # Fetch staff list
         staff_list = supabase.table('staff').select('staff_id, staffname').execute().data
-        
-        # Fetch customer list
         customer_list = supabase.table('customers').select('cust_id, customer, mobile, cust_type').execute().data
         
-        # Fetch recent calls with customer details and assigned staff
-        recent_calls = supabase.table('calls').select(
-            'call_id, complaint, call_status, created_at, allot_staff_id, cust_id, customers(customer, mobile), staff(staffname)'
-        ).order('created_at', desc=True).limit(50).execute().data
-        
+        # Fetch calls safely without direct PostgREST table joins
+        calls_data = supabase.table('calls').select('*').order('created_at', desc=True).limit(50).execute().data
+
+        # Create quick-lookup dictionaries for fast matching
+        cust_map = {c['cust_id']: c for c in customer_list}
+        staff_map = {s['staff_id']: s['staffname'] for s in staff_list}
+
+        # Merge customer and staff info directly into each call object
+        for call in calls_data:
+            cust_info = cust_map.get(call.get('cust_id'), {})
+            call['customer_name'] = cust_info.get('customer', 'N/A')
+            call['mobile'] = cust_info.get('mobile', '')
+            call['staffname'] = staff_map.get(call.get('allot_staff_id'), 'Unassigned')
+
         return render_template(
             'index.html',
             lookups=lookups,
             staff=staff_list,
             customers=customer_list,
-            calls=recent_calls
+            calls=calls_data
         )
     except Exception as e:
-        return f"Database error: {str(e)}", 500
-
-
+        return f"Database error in dashboard: {str(e)}", 500
 # 2. Staff Cards Route
 @app.route('/staff-cards')
 def staff_cards():
